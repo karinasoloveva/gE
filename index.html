@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Геокарта всех пользователей</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    #map { height: 500px; width: 100%; margin-top: 20px; }
+    input, button { padding: 10px; margin: 5px 0; font-size: 16px; display: block; }
+  </style>
+</head>
+<body>
+  <h2>📍 Геолокация пользователей</h2>
+  <input id="nameInput" placeholder="Ваше имя" />
+  <button onclick="sendLocation()">Отправить мое местоположение</button>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    let map = L.map('map').setView([48.5, 34.6], 6); // Каменское по умолчанию
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+
+    async function sendLocation() {
+      const name = document.getElementById('nameInput').value.trim();
+      if (!name) {
+        alert('Введите имя');
+        return;
+      }
+
+      if (!navigator.geolocation) {
+        alert('Геолокация не поддерживается');
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+
+        await fetch('/api/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, lat, lon })
+        });
+
+        alert('Местоположение отправлено!');
+      }, () => {
+        alert('Не удалось получить геолокацию');
+      });
+    }
+
+    async function updateMap() {
+      const res = await fetch('/api/users');
+      const users = await res.json();
+
+      map.eachLayer(layer => {
+        if (layer instanceof L.Marker) map.removeLayer(layer);
+      });
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+      }).addTo(map);
+
+      users.forEach(user => {
+        L.marker([user.lat, user.lon]).addTo(map)
+          .bindPopup(`${user.name}`)
+          .openPopup();
+      });
+    }
+
+    setInterval(updateMap, 5000);
+    updateMap();
+  </script>
+</body>
+</html>
