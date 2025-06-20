@@ -2,83 +2,116 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Геолокация</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <title>Геолокация друзей</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+  />
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
-    #map { height: 500px; width: 100%; margin-top: 20px; }
-    input, button { padding: 10px; margin: 5px 0; font-size: 16px; display: block; }
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    #map {
+      height: 500px;
+      width: 100%;
+      margin-top: 20px;
+    }
+    input, button {
+      padding: 10px;
+      font-size: 16px;
+      margin: 5px 0;
+      display: block;
+    }
   </style>
 </head>
 <body>
-  <h2>🌍 Геолокация</h2>
-  <input id="nameInput" placeholder="Ваше имя" />
-  <button onclick="sendLocation()">Показать моё местоположение</button>
-  <div id="map"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-  <script>
-    let map = L.map('map').setView([48.5, 34.6], 6); // Каменское
+<h2>Введите ваше имя и поделитесь своим местоположением</h2>
+<label for="nameInput">Имя:</label>
+<input type="text" id="nameInput" placeholder="Ваше имя" />
+<button id="sendLocationBtn">Отправить и показать на карте</button>
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19
-    }).addTo(map);
+<div id="map"></div>
 
-    const isAdmin = new URLSearchParams(window.location.search).get('admin') === 'true';
-    let selfMarker = null;
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script>
+  let map = L.map('map').setView([50.45, 30.52], 6); // Начальный вид на Украину
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+  }).addTo(map);
 
-    async function sendLocation() {
-      const name = document.getElementById('nameInput').value.trim();
-      if (!name) {
-        alert('Введите имя');
-        return;
+  let selfMarker = null;
+  let otherMarkers = {};
+
+  async function sendLocation() {
+    const name = document.getElementById('nameInput').value.trim();
+    if (!name) {
+      alert('Введите имя');
+      return;
+    }
+    if (!navigator.geolocation) {
+      alert('Геолокация не поддерживается вашим браузером');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+
+      // Удаляем старый маркер пользователя
+      if (selfMarker) {
+        map.removeLayer(selfMarker);
       }
 
-      if (!navigator.geolocation) {
-        alert('Геолокация не поддерживается');
-        return;
+      selfMarker = L.marker([lat, lon]).addTo(map)
+        .bindPopup(name + ' (вы)').openPopup();
+
+      map.setView([lat, lon], 12);
+
+      // Отправляем на сервер
+      await fetch('/location', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, lat, lon})
+      });
+
+      // Получаем и обновляем маркеры других пользователей
+      updateUsers();
+    }, (err) => {
+      alert('Ошибка определения местоположения: ' + err.message);
+    });
+  }
+
+  async function updateUsers() {
+    const response = await fetch('/users');
+    const users = await response.json();
+
+    // Удаляем маркеры, которых больше нет
+    for (const name in otherMarkers) {
+      if (!users.find(u => u.name === name)) {
+        map.removeLayer(otherMarkers[name]);
+        delete otherMarkers[name];
       }
-
-      navigator.geolocation.getCurrentPosition(async (pos) => {
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-
-        if (selfMarker) map.removeLayer(selfMarker);
-        selfMarker = L.marker([lat, lon]).addTo(map)
-          .bindPopup(`${name} (Вы)`)
-          .openPopup();
-
-        map.setView([lat, lon], 12);
-
-        await fetch('/api/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, lat, lon })
-        });
-      }, () => {
-        alert('Ошибка получения геолокации');
-      });
     }
 
-    async function updateMap() {
-      if (!isAdmin) return; // Только админ видит других
+    // Добавляем или обновляем маркеры других пользователей
+    users.forEach(user => {
+      if (user.name === document.getElementById('nameInput').value.trim()) return; // не показываем себя дважды
+      if (otherMarkers[user.name]) {
+        otherMarkers[user.name].setLatLng([user.lat, user.lon]);
+      } else {
+        otherMarkers[user.name] = L.marker([user.lat, user.lon]).addTo(map)
+          .bindPopup(user.name);
+      }
+    });
+  }
 
-      const res = await fetch('/api/users');
-      const users = await res.json();
+  // Обновлять список пользователей каждые 5 секунд
+  setInterval(updateUsers, 5000);
 
-      users.forEach(user => {
-        if (!selfMarker || user.name !== document.getElementById('nameInput').value.trim()) {
-          L.marker([user.lat, user.lon]).addTo(map)
-            .bindPopup(`${user.name}`);
-        }
-      });
-    }
-
-    if (isAdmin) {
-      setInterval(updateMap, 5000);
-      updateMap();
-    }
-  </script>
+  document.getElementById('sendLocationBtn').addEventListener('click', sendLocation);
+</script>
 </body>
 </html>
 
